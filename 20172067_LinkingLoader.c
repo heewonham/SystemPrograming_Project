@@ -2,7 +2,9 @@
 
 int main(void) {
 
-	int address = 0;				// 주소 저장 (dump 함수시 필요)  
+	int address = 0;				// 주소 저장 (dump 함수시 필요)
+	int progAddr = 0x00;
+	 
 
 	HistoryList historyL;			// history를 저장할 list 	
 	OpcodeTable* opcodeT;			// opcode들을 저장할 table
@@ -582,7 +584,8 @@ void edit(char* command, char* first, char* second, HistoryList* historyL, unsig
 			printf("Please check the value.\n");
 		// 정상을 경우	
 		else {
-			writeHistory(input, &historyL); // history 기록 
+			if(!(strcmp(command,"")))
+				writeHistory(input, &historyL); // history 기록 
 			row = address / COL_SIZE;		// 주소를 16 나눈 몫 
 			col = address % COL_SIZE;		// 주소를 16 나눈 나머지 
 			memory[row][col] = value;		// 해당 memory 수정 
@@ -2052,236 +2055,84 @@ void loader(char *command, char* first, char* second, char* third, HistoryList *
 	return;
 }
 
-int loadPass1(char(*files)[MAX_ARG_LEN], int count, int _progAddr, ESHashTable **_est){
-
-	FILE *fp[3];		// file pointer for reading obj files
-	char input[MAX_BUFR];
-	
-	char text[7];	// text for reading file 
-	char addr[7];	// addr for reading file
-	char len[7];
-	char *ptr;
-	int progAddr;	// start address of program
-	int csAddr;		// address of control section
-	int csLen;		// length of control section
-	int errorFlag;	// error flag (-1: file open error, -2: Duplicate external symbol)
-	int tmp;
-	int i, j;
-
-	// get PROGADDR from operating system
-	progAddr = _progAddr;
-	// set CSADDR to PROGADDR {for first control section}
-	csAddr = progAddr;
-
-	for (i = 0; i < count; i++) {
-		
-		fp = fopen(files[i], "r");
-		if (fp == NULL) {
-			printf("%s file does not exist.\n",files[i]);
-			return -1;
-		}
-		
-		while (fgets(input, MAX_BUFR, fp)) {
-
-			memset(text, '\0', 7);
-			memset(addr, '\0', 7);
-			memset(len, '\0', 7);
-
-			if (buf[0] == 'H') {
-				for (j = 1; j < 7; j++) {
-					if (buf[j] == ' ')
-						break;
-					text[j - 1] = buf[j];
-				}
-				for (j = 7; j < 13; j++)
-					addr[j - 7] = buf[j];
-				sscanf(addr, "%x", &tmp);
-				csAddr += tmp;
-				// set CSLTH to control section length
-				for (j = 13; j < 19; j++)
-					len[j - 13] = buf[j];
-				sscanf(len, "%x", &csLen);
-				// search ESTAB for control section name
-				if (searchESHashTable(text, *_est)) {
-					printf("! Duplicate external symbol\n");
-					errorFlag = -2;
-					return errorFlag;
-				}
-				else {
-					// enter control section name into ESTAB with value CSADDR
-					writeESHashTable(1, text, text, csAddr, csLen, *_est);
-				}
-			}
-
-			while (TRUE) {
-				if (buf[0] == 'E')
-					break;
-					
-				// read next input record
-				memset(buf, '\0', MAX_BUF_LEN);
-				fgets(buf, MAX_BUF_LEN, fp);
-
-				if (buf[0] == 'D') {
-					// if record type = 'D', then
-					ptr = &buf[1];
-					strcpy(buf, ptr);
-					// each symbol in the record
-					while (buf[0] != '\0') {
-						memset(text, '\0', 7);
-						memset(addr, '\0', 7);
-
-						// set internal symbol name & address
-						for (j = 0; j < 6; j++) {
-							if (buf[j] == ' ')
-								break;
-							text[j] = buf[j];
-						}
-						for (j = 6; j < 12; j++)
-							addr[j - 6] = buf[j];
-						sscanf(addr, "%x", &tmp);
-						// search ESTAB for control section name
-						if (searchESHashTable(text, *_est)) {
-							printf("! Duplicate external symbol\n");
-							errorFlag = -2;
-							return errorFlag;
-						}
-						else {
-							// enter symbol into ESTAB with value
-							// (CSADDR + indicated address)
-							writeESHashTable(0, "\0", text, csAddr + tmp, -1, *_est);
-						}
-
-						// set pointer of next internal symbol text
-						if (buf[j] != '\n')
-							ptr = &buf[j];
-						else
-							ptr = &buf[j + 1];
-						strcpy(buf, ptr);
-					}
-				}
-			}
-			// add CSLTH to CSADDR {starting address for next control section}
-			csAddr += csLen;
-		}
-
-		fclose(fp);
-	}
-	
-	return 0;
-}
-
 void initExSymTable(ExSymbolTable *exSymT){
 	
 	int i;
-	*exSymT = (ExSymbolTable*)malloc(sizeof(ExSymbolTable) * TABLE_SIZE);
+	*exSymT = (ExSymbolTable*)malloc(sizeof(ExSymbolTable) * 3);
 
 	// symbol Hash Table 초기화 
-	for (i = 0; i < TABLE_SIZE; i++) {
+	for (i = 0; i < 3; i++) {
 		(*exSymT)[i].cnt = 0;
+		(*exSymT)[i].csname = NULL;
+		(*exSymT)[i].length = 0;
+		(*exSymT)[i].address = 0;
 		(*exSymT)[i].node = NULL;
+		(*exSymT)[i].last = NULL;
 	}
 	return;
 }
 
-int findExSymbol(char *label, ExSymbolTable *exSymT){
+int findExSymbol(int csflag ,char *csname, char *label, ExSymbolTable *exSymT){
 	
-	ExSymbolNode* findNode;		// symTab의 전 노드를 탐색할 SymbolNode pointer 생성
-	int i, index = 0;						// label의 문자열을 계산한 index( symTab 접근할 key)
-
-	/* 나중에 label으로 symbol를 찾을 수 있게
-	label 문자들을 더하여 20으로 나눈 나머지를 인덱스로 구함*/
-	for (i = 0; i < (int)strlen(label); i++) {
-		index += label[i];
-	}
-	index = index % TABLE_SIZE;
-
-	// symbol table을 순회하여 label의 주소값을 반환한다.
-	for (findNode = exSymT[index].node; findNode != NULL; findNode = (findNode)->next) {
-		if (!strcmp(label, (findNode)->label)) {
-			return TRUE;
+	int i, index = -1;
+	SymbolNode* findNode;		
+	
+	for(i = 0; i < 3, (*exSymT)[i].csname != NULL; i++){
+		if (!strcmp(csname, (*exSymT)[i].csname)){
+			if (csflag == 0) return (*exSymT)[i].address;
+			else{
+				index = i;
+				break;
+			}
 		}
 	}
-	return FALSE;
 	
+	if(csflag == 0) return -1;
+	else{
+		if (index == -1) return -1;
+		for (findNode = exSymT[index].node; findNode != NULL; findNode = (findNode)->next) {
+			if (!strcmp(label, (findNode)->label))
+				return findNode->location;
+		}
+	}
 }
 
-void makeExSymbol(int _csflag, char *_csName, char *_symName, int _addr, int _len, ESHashTable *_est){
+void makeExSymbol(int flag, int index ,char *csname, char *label, int addr, int len, ExSymbolTable *exSymT){
 	
-	int i, index;							// hash index 를 저장
+	int i;							// hash index 를 저장
 	SymbolNode* tmpNode;	// 새로운 값을 저장할 SymbolNode pointer 생성
-	SymbolNode* findNode;	// symTab의 전 노드를 탐색할 SymbolNode pointer 생성
 
-	// symbol node에 새로운 값을 저장  
 	tmpNode = (SymbolNode*)malloc(sizeof(SymbolNode));
 	tmpNode->next = NULL;
 	strcpy(tmpNode->label, label);
 	tmpNode->location = location;
-
-	/* 나중에 label으로 symbol를 찾을 수 있게
-	label 문자들을 더하여 20으로 나눈 나머지를 인덱스로 구함*/
-	index = 0;
-	for (i = 0; i < (int)strlen(label); i++) {
-		index += label[i];
-	}
-	index = index % TABLE_SIZE;
 	tmpNode->index = index;
-
-	// 새로운 symbol이 기존에 있는지 확인
-	for (findNode = (*symtab)[index].node; findNode != NULL; findNode = findNode->next) {
-		if (!strcmp(label, findNode->label)) {
-			printf("%s is Duplicate symbol.\n", label);
-			return -1;
+	
+	if(flag == 0){
+		strcpy((*exSymT)[index].csname, csname);
+		(*exSymT)[i].length = len;
+		(*exSymT)[i].length = addr;
+		
+	}
+	else{
+		// 정상일 경우 symTab의 새로운 노드를 추가한다.
+		(*exSymT)[index].cnt++;
+		if ((*exSymT)[index].node == NULL) {	// 기존에 저장된 node가 없는 경우
+			(*exSymT)[index].node = tmpNode;
+			(*exSymT)[index].last = tmpNode;
+		}
+		else {
+			((*exSymT)[index].last)->next = tmpNode;
+			(*exSymT)[index].last) = tmpNode;
 		}
 	}
-
-	// 정상일 경우 symTab의 새로운 노드를 추가한다.
-	(*symtab)[index].cnt++;
-	if ((*symtab)[index].node == NULL) {	// 기존에 저장된 node가 없는 경우
-		(*symtab)[index].node = tmpNode;
-	}
-	else {
-		tmpNode->next = (*symtab)[index].node;
-		(*symtab)[index].node = tmpNode;
-	}
-	return 0;
 	
-	ESNode *newNode;
-	int idx;	// hash table index (access key)
-	int i;
-
-	newNode = (ESNode *)malloc(sizeof(ESNode));
-	// init and set node data
-	newNode->idx = 0;
-	newNode->csFlag = _csflag;
-	strcpy(newNode->csName, _csName);
-	strcpy(newNode->symName, _symName);
-	newNode->addr = _addr;
-	newNode->len = _len;
-	newNode->next = NULL;
-
-	// Set index of hash table. (Using access key)
-	idx = 0;
-	for (i = 0; i < strlen(_symName); i++) {
-		idx += _symName[i];
-	}
-	newNode->idx = idx % HT_SIZE;
-
-	// Link node to table.
-	_est[idx % HT_SIZE].cnt++;
-	if (_est[idx % HT_SIZE].next == NULL) {
-		_est[idx % HT_SIZE].next = newNode;
-	}
-	else {
-		newNode->next = _est[idx % HT_SIZE].next;
-		_est[idx % HT_SIZE].next = newNode;
-	}
-
 	return;
 }
 
 void freeExSymbolTable(ExSymbolTable *exSymT){
 	
-	ExSymbolNode* deleteN;	
+	SymbolNode* deleteN;	
 	int i;
 
 	// 만약 external symbol table이 비어있을 경우 해당 함수를 빠져나간다.
@@ -2289,7 +2140,7 @@ void freeExSymbolTable(ExSymbolTable *exSymT){
 		return;
 
 	// 아닐 경우 모든 table을 순회하며 삭제한다.
-	for (i = 0; i < TABLE_SIZE; i++) {
+	for (i = 0; i < 3; i++) {
 		while ((*exSymT)[i].cnt != 0) {
 			deleteN = (*exSymT)[i].node;
 			(*exSymT)[i].node = deleteN->next;
@@ -2301,4 +2152,318 @@ void freeExSymbolTable(ExSymbolTable *exSymT){
 	free(*exSymT);
 	return;
 
+}
+
+void printExSymbol(ExSymbolTable *exSymT, int *_progLen){
+	
+	SymbolNode* tmpNode;
+	SymbolNode* tmpNode2;
+	
+	int index;			// dynamic array index
+	int total = 0;		// total length
+	int i, j;
+	
+	// print symbols
+	printf("\tcontorl \tsymbol  \taddress \tlength  \t\n");
+	printf("\tsection \tname    \t        \t        \t\n");
+	printf("\t--------------------------------------------------------\n");
+	
+	for(i = 0; i < 3; i++){
+		if((*exSymT)[i].node != NULL){
+			printf("\t%-8s\t%-8s\t%04X    \t%04X    \n", (*exSymT)[i].csName, "", (*exSymT)[i].address, (*exSymT)[i].length);			
+			total += (*exSymT)[i].length;
+			tmpNode = tmpNode2 = (*exSymT)[i].node;
+			while(tmpNode != NULL){
+				printf("\t%-8s\t%-8s\t%04X    \t        \n", "", tmpNode->label, tmpNode->location);
+				tmpNode2 = tmpNode->next;
+				tmpNode = tmpNode2;
+			}
+			printf("\t--------------------------------------------------------\n");
+			printf("\t%-8s\t%-8s\ttotal length\t%04X\n", "", "", total);
+			
+		}
+	}
+	free(tmpNode);
+	free(tmpNode2);
+	//*_progLen = totalLen;
+	return;
+}
+
+int loadPass1(char(*files)[MAX_ARG_LEN], int count, int progAddr, ExSymbolTable *exSymT){
+
+	FILE *fp[3];		// file pointer for reading obj files
+	char input[MAX_BUFR];
+	char text[7];	// text for reading file 
+	char tmp[7];	// addr for reading file
+	char csname[7];
+	char *head;
+	
+	int address;
+	int length;
+	int cAddr = progAddr;		// address of control section
+	int i, j, k, h;
+
+	for (i = 0; i < count; i++) {
+		
+		memset(csname, '\0', 7);
+		fp = fopen(files[i], "r");
+		if (fp == NULL) {
+			printf("%s file does not exist.\n",files[i]);
+			return -1;
+		}
+		
+		while (fgets(input, MAX_BUFR, fp)) {
+
+			memset(text, '\0', 7);
+			memset(tmp, '\0', 7);
+
+			if (input[0] == 'H') {
+				for (j = 1; j < 7; j++) {
+					if (input[j] == ' ')
+						break;
+					text[j - 1] = input[j];
+				}
+				strcpy(csname,text);
+				
+				for (j = 7; j < 13; j++)
+					tmp[j - 7] = input[j];
+				sscanf(tmp, "%x", &address);
+				csAddr += address;
+				
+				memset(tmp, '\0', 7);
+				for (j = 13; j < 19; j++)
+					tmp[j - 13] = input[j];
+				sscanf(tmp, "%x", &length);
+
+				if (findExSymbol(0,text,"",exSymT) != -1) {
+					printf("Duplicate external symbol.\n");
+					return -1;
+				}
+				else {
+					makeExSymbol(0, i, csname, "", csAddr, length, exSymT);
+				}
+			}
+		}
+
+		while (fgets(input, MAX_BUFR, fp)) {
+			if(input[0] == '.')
+				continue;
+			else if(input[0] == 'E')		
+				break;
+				
+			else if (input[0] == 'D') {
+				head = &input[1];
+				for(k = 0; k < strlen(head); k++){
+					memset(text, '\0', 7);
+					memset(tmp, '\0', 7);
+
+					for(j = 0+k; j < 6+k; j++){
+						if(head[j] == ' ') break;
+						text[j-k] = head[j];
+					}
+					for(j = 6+k; j < 12+k; j++){
+						tmp[j-6-k] = head[j];
+					}
+					sscanf(tmp, "%x", &address);
+					
+					if (findExSymbol(1,csname,text,exSymT) != -1) {
+						printf("Duplicate external symbol.\n");
+						return -1;
+					}
+					else {
+						makeExSymbol(1, i, csname, text, csAddr+address, 0, exSymT);
+					}
+					k = j-1;
+				}
+			}
+		}
+		csAddr += length;	
+		fclose(fp);
+	}
+	return 0;
+}
+
+int loadPass2(char(*_arg)[MAX_ARG_LEN], int count, int progAddr, ExSymbolTable *exSymT, int *execAddr){
+	
+	FILE *fp[3];		// file pointer for reading obj files
+	char input[MAX_BUFR];
+	char text[7];	// text for reading file 
+	char tmp[7];	// addr for reading file
+	char *head;
+	
+	int address;
+	int length;
+	int csAddr = progAddr;		// address of control section
+	int i, j, k, h;
+
+	RefSymbolList refSymL;	// reference symbols list
+	RefSymbolNode *tmpref = NULL;
+	char oper;
+	int symVal;		// value(address) of symbol
+	int refcount;
+	int refNum;	// reference symbol number
+	int rAddr;	// start address of record
+	int rLen;		// length of record
+	int objCode;	// object code
+
+	
+	refSymL.head = refSymL.last = NULL;
+	csAddr = *extcAddr = progAddr;
+	
+	for (i = 0; i < count; i++) {
+		
+		fp = fopen(files[i], "r");
+		if (fp == NULL) {
+			printf("%s file does not exist.\n",files[i]);
+			return -1;
+		}
+		refSymCnt = 0;
+		
+		while (fgets(input, MAX_BUFR, fp)) {
+
+			memset(text, '\0', 7);
+			memset(tmp, '\0', 7);
+
+			if (input[0] == 'H') {
+				for (j = 1; j < 7; j++) {
+					if (input[j] == ' ')
+						break;
+					text[j - 1] = input[j];
+				}
+				
+				for (j = 7; j < 13; j++)
+					tmp[j - 7] = input[j];
+				sscanf(tmp, "%x", &address);
+				csAddr += address;
+				
+				// write reference symbol & number in list
+				makeRefSymbol(++refcount, text, &refSymL);
+				
+				memset(tmp, '\0', 7);
+				for (j = 13; j < 19; j++)
+					tmp[j - 13] = input[j];
+				sscanf(tmp, "%x", &length);
+
+			}
+		}
+		
+		while (fgets(input, MAX_BUFR, fp)) {
+			
+			if(input[0] == '.')
+				continue;
+			else if(input[0] == 'E'){
+				memset(tmp, '\0', 7);
+				if (strlen(input) > 1) {
+					for (j = 1; j < 7; j++)
+						tmp[j - 1] = buf[j];
+					sscanf(tmp, "%x", &refAddr);
+					*execAddr = csAddr + refAddr;
+				}
+				csAddr += length;
+				break;
+				
+			}
+				
+			if (input[0] == 'R') {
+				head = &input[1];
+				for(k = 0; k < strlen(head); k++){
+					memset(text, '\0', 7);
+					memset(tmp, '\0', 7);
+					refNum = 0;
+
+					for(j = 0+k; j < 2+k; j++){
+						text[j-k] = head[j];
+					}
+					sscanf(text, "%x", &refNum);
+					
+					for(j = 2+k; j < 8+k; j++){
+						if(head[j] == ' ') break;
+						tmp[j-2-k] = head[j];
+					}
+					makeRefSymbol(++refcount, tmp, &refSymL);	
+					k = j-1;
+				}
+			}
+			else if (input[0] == 'T') {
+				rAddr = rLen = 0;
+				sscanf(input+1, "%6x%2x", &rAddr, &rLen);
+				for (j = 0; j < rLen; j+=2) {
+					sscanf(input+9+j, "%2x", &objCode);
+					edit("",csAddr + recAddr + j, objCode, NULL, (*memory)[COL_SIZE]);
+				}
+			}
+			else if (input[0] == 'M') {
+				memset(text, '\0', 7);
+				memset(tmp, '\0', 7);
+				sscanf(input + 1, "%6x%2x%c%x", &rAddr, &rLen, &oper, &refNum);
+				
+				reftmp = refSymL.head;
+				while(reftmp != NULL){
+					if(reftmp->refnum == refNum){
+						strcpy(text,reftmp->symbol);
+						break;
+					}
+					reftmp = reftmp->next;
+				}
+				if (searchESHashTable(text, *_est)) {
+					// found: add or subtract symbol value at location
+					symVal = returnSymbolValueFromESTab(text, *_est);
+					setModificationValue(csAddr + recAddr, recLen, symVal, op, _mem);
+					
+					if (errorFlag == -2) {
+						printf("! Modification field overflow\n");
+						return errorFlag;
+					} 
+					else if (errorFlag == -3) {
+						printf("! Invalid operator\n");
+						return errorFlag;
+					}
+				}
+				else {
+				// not found: set error flag
+					printf("! Undefined external symbol\n");
+					errorFlag = -1;
+					return errorFlag;
+				}
+			}
+		}
+
+		refSymL.head = refSymL.last = NULL;
+		freeRefSymbol(&refSymL);
+
+		fclose(fp);
+	}
+
+	return -1;
+}
+
+void makeRefSymbol(int refnum, char *symbol, RefSymbolList *refSymL){
+	
+	RefSymbolNode *tmpNode = (RefSymbolNode *)malloc(sizeof(RefSymbolNode));
+	tmpNode->next = NULL;
+	tmpNode->refnum = refnum;
+	strcpy(tmpNode->symbol, symbol);
+
+	if (refSymL->head == NULL) {
+		refSymL->head = refSymL->last = tmpNode;
+	}
+	else {
+		refSymL->last->next = tmpNode;
+		refSymL->last = tmpNode;
+	}
+	return;
+}
+
+void freeRefSymbol(RefSymbolList *refSymL){
+	
+	RefSymbolNode *deleteNode = refSymL->head;
+	refSymL->last = NULL;
+
+	while (deleteNode != NULL){
+		 refSymL->head = deleteNode->next;
+		 free(deleteNode);
+		 deleteNode = refSymL->head;
+	}
+	
+	return;
 }

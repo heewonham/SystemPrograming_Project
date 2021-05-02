@@ -81,7 +81,7 @@ typedef struct modifList {
 
 typedef struct breakPointNode {
 	int loc;	// location of break point
-	struct _BreakPointNode *next;	// next node pointer
+	struct breakPointNode *next;	// next node pointer
 } BreakPointNode;
 
 typedef struct breakPointList {
@@ -90,32 +90,25 @@ typedef struct breakPointList {
 } BreakPointList;
 
 
-typedef struct exSymbolNode {
-	int index;			// index of hash table = access key
-	int csFlag;			// control section flag (1: control section, 0: symbol)
-	char cs[7];		// name of control section
-	char sym[7];		// name of symbol
-	int addr;			// address of control section or symbol (hex)
-	int len;			// program length (symbol : 0)
-	struct _ESNode *next;	// next node pointer
-} ExSymbolNode;
-
 typedef struct exSymbolTable {
-	int count;		// the number of nodes about corresponding cell of table
-	ExSymbolNode *next;	// node pointer of this cell
+	int cnt;
+	char csname[7];
+	int length;
+	int address;
+	SymbolNode *node;	// node pointer of this cell
+	SymbolNode *last;
 } ExSymbolTable;
 
+typedef struct refSymbolNode {
+	int refnum;			// reference number
+	char symbol[7];		// symbol name
+	struct refSymbolNode *next;	 // next node pointer
+} RefSymbolNode;
 
-typedef struct _RRecNode {
-	int num;			// reference number
-	char symName[7];		// symbol name
-	struct _RRecNode *next;	 // next node pointer
-} RRecNode;
-// - list
-typedef struct _RRecList {
-	RRecNode *head;	// head node pointer
-	RRecNode *curr;	// current node pointer
-} RRecList;
+typedef struct refSymbolList {
+	RefSymbolNode *head;	// head node pointer
+	RefSymbolNode *last;	// current node pointer
+} RefSymbolList;
 
 
 /* º¯¼ö */
@@ -507,5 +500,5 @@ void fileModifynode(FILE* fwp, ModifList* modiflist);
 	----------------------------------------------------------------------- */
 void freeModifynode(ModifList** modiflist);
 
-#endif
+
 
