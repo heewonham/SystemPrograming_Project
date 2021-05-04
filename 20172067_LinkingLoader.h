@@ -79,41 +79,52 @@ typedef struct modifList {
 	ModifNode* curr;			// 현재 node pointer
 } ModifList;
 
+/* breakpoint 관련 구조체 */
+/* 1. breakpoint 위치를 저장하는 node */
 typedef struct breakPointNode {
-	int loc;	// location of break point
-	struct breakPointNode *next;	// next node pointer
+	int loc;						// location
+	struct breakPointNode* next;	// 다음 node pointer
 } BreakPointNode;
 
+/* 2. breakpoint linked list */
 typedef struct breakPointList {
-	BreakPointNode *head;	// head node pointer
-	BreakPointNode *curr;	// current node pointer
+	BreakPointNode* head;			// 시작 node pointer
+	BreakPointNode* curr;			// 현재 node pointer
 } BreakPointList;
 
 
+/* external symbol 관련 구조체 */
+/* 1. external symbol table.
+ control section name과 길이, 주소 등을 저장한다 */
 typedef struct exSymbolTable {
-	int cnt;
-	char csname[7];
-	int length;
-	int address;
-	SymbolNode *node;	// node pointer of this cell
-	SymbolNode *last;
+	int cnt;				// symbol의 수 
+	char csname[7];			// control section 이름 
+	int length;				// control section 길이 
+	int address;			// 시작 주소 
+	SymbolNode* node;		// symbol node
+	SymbolNode* last;		// 마지막으로 추가된 symbol node	
 } ExSymbolTable;
 
+/* reference symbol 관련 구조체 */
+/* 1. reference symbol를 저장하는 node */
 typedef struct refSymbolNode {
-	int refnum;			// reference number
-	char symbol[7];		// symbol name
-	struct refSymbolNode *next;	 // next node pointer
+	int refnum;					// reference number
+	char symbol[7];				// symbol 이름 
+	struct refSymbolNode* next;	 // 다음 node pointer
 } RefSymbolNode;
 
+/* 2. reference symbol를 저장하는 linked list */
 typedef struct refSymbolList {
-	RefSymbolNode *head;	// head node pointer
-	RefSymbolNode *last;	// current node pointer
+	RefSymbolNode* head;	// 시작 node pointer
+	RefSymbolNode* last;	// 현재 node pointer
 } RefSymbolList;
 
 
-/* 변수 */
+/* 전역 변수 */
 unsigned char memory[ROW_SIZE][COL_SIZE]; 	// 메모리 저장 (65536 * 16)
 SymbolTable* symTab = NULL;					// symbol들을 저장할 table
+int progAddr = 0x00;						// progAddr 주소 , default 는 0x00이다. 
+int execAddr = -1;							// execute의 시작 주소
 
 
 /* =============  명령어 정제함수  ============= */
@@ -501,4 +512,128 @@ void fileModifynode(FILE* fwp, ModifList* modiflist);
 void freeModifynode(ModifList** modiflist);
 
 
+/* ============ progaddr 관련 함수 ============ */
+
+/* -------------------------------------------------------------------------
+	함수 : void progaddr(char* command, char* first, HistoryList* historyL);
+	목적 : progaddr를 지정한다.  
+	반환값 : 없음.
+	----------------------------------------------------------------------- */
+void progaddr(char* command, char* first, HistoryList* historyL);
+
+
+/* ============ loader 관련 함수 ============ */
+
+/* -------------------------------------------------------------------------
+	함수 : void initExSymTable(ExSymbolTable** exSymT);
+	목적 : external symbol table을 저장하기 위해 초기화 과정을 실행한다.  
+	반환값 : 없음.
+	----------------------------------------------------------------------- */
+void initExSymTable(ExSymbolTable** exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : int findExSymbol(int csflag, char* csname, char* label, ExSymbolTable** exSymT);
+	목적 : external symbol table에서 external symbol table을 찾아서 주소를 반환한다.
+	만약 저장된 것이 없으면 -1를 반환한다. csflag는 control section을 구분하는 것으로
+	만약 0이면 external Symbol table에서 찾고, 아니면 external symbol node에서 찾는다.   
+	반환값 : 찾으면 주소값, 없으면 -1.
+	----------------------------------------------------------------------- */
+int findExSymbol(int csflag, char* csname, char* label, ExSymbolTable** exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : void makeExSymbol(int flag, int index, char* csname, char* label, int addr, int len, ExSymbolTable** exSymT);
+	목적 : external symbol table에서 추가한다. csflag는 control section을 구분하는 것으로
+	만약 0이면 control section으로 external Symbol table에 저장하고, 아니면
+	symbol node에 저장하여 external symbol table의 node에 연결한다.   
+	반환값 : 없음 
+	----------------------------------------------------------------------- */
+void makeExSymbol(int csflag, int index, char* csname, char* label, int addr, int len, ExSymbolTable** exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : void freeExSymbolTable(ExSymbolTable** exSymT);
+	목적 : external symbol table을 free한다.  
+	반환값 : 없음 
+	----------------------------------------------------------------------- */
+void freeExSymbolTable(ExSymbolTable** exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : void printExSymbol(int count, ExSymbolTable* exSymT);
+	목적 : count 즉 obj 파일 수의 external symbol table에서 control section과 symbol node을 출력한다.  
+	반환값 : 없음 
+	----------------------------------------------------------------------- */
+void printExSymbol(int count, ExSymbolTable* exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : void loader(int arg, char* command, char* first, char* second, char* third, HistoryList* historyL);
+	목적 :  loadpass1 과 loadpass2 함수를 호출한다. 
+	반환값 : 없음 
+	----------------------------------------------------------------------- */
+void loader(int arg, char* command, char* first, char* second, char* third, HistoryList* historyL);
+
+/* -------------------------------------------------------------------------
+	함수 : int loadPass1(char(*files)[MAX_STR], int count, ExSymbolTable** exSymT);
+	목적 :  obj코드로 프로그램을 로드하기 위해 external symbol table을 생성한다.  
+	반환값 : 에러발생시 -1 
+	----------------------------------------------------------------------- */
+int loadPass1(char(*files)[MAX_STR], int count, ExSymbolTable** exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : int loadPass2(char(*_arg)[MAX_STR], int count, ExSymbolTable** exSymT);
+	목적 :  external symbol table과 referenc symbol을 사용하여 사용하여 메모리에 load 하고 modification 관련하여
+	메모리를 edit한다.   
+	반환값 : 에러발생시 -1 
+	----------------------------------------------------------------------- */
+int loadPass2(char(*_arg)[MAX_STR], int count, ExSymbolTable** exSymT);
+
+/* -------------------------------------------------------------------------
+	함수 : void makeRefSymbol(int refnum, char* symbol, RefSymbolList* refSymL);
+	목적 :  reference symbol과 관련하여 해당 number와 symbol name을 저장하는 list를
+	저장한다.   
+	반환값 : 없음
+	----------------------------------------------------------------------- */
+void makeRefSymbol(int refnum, char* symbol, RefSymbolList* refSymL);
+
+/* -------------------------------------------------------------------------
+	함수 : void freeRefSymbol(RefSymbolList* refSymL);
+	목적 : 만들었던 reference symbol list를 free한다. 
+	반환값 : 없음
+	----------------------------------------------------------------------- */
+void freeRefSymbol(RefSymbolList* refSymL);
+
+
+/* ============ break point 관련 함수 ============ */
+
+/* -------------------------------------------------------------------------
+	함수 : void bp(char* command, char* first, HistoryList* historyL, BreakPointList* breakP);
+	목적 : break point관련 함수를 실행한다. argument가 hex일 경우 breakpoint를 추가하고,
+	clear일 경우, 삭제하고 아무것도 없을 경우 출력한다.  
+	반환값 : 없음.
+	----------------------------------------------------------------------- */
+void bp(char* command, char* first, HistoryList* historyL, BreakPointList* breakP);
+
+/* -------------------------------------------------------------------------
+	함수 : void printBreakPoint(BreakPointList* breakP);
+	목적 : break point를 출력한다. 
+	반환값 : 없음.
+	----------------------------------------------------------------------- */
+void printBreakPoint(BreakPointList* breakP);
+
+/* -------------------------------------------------------------------------
+	함수 : void writeBreakPoint(int location, BreakPointList* breakP);
+	목적 : break point를 추가한다. 
+	반환값 : 없음.
+	----------------------------------------------------------------------- */
+void writeBreakPoint(int location, BreakPointList* breakP);
+
+/* -------------------------------------------------------------------------
+	함수 : void freeBreakPointList(BreakPointList** breakP);
+	목적 : break point를 free한다. 
+	반환값 : 없음.
+	----------------------------------------------------------------------- */
+void freeBreakPointList(BreakPointList** breakP);
+
+
+/* ============ run 관련 함수 ============ */
+
+void run() {}
 

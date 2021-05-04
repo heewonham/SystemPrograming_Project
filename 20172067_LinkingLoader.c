@@ -3,16 +3,16 @@
 int main(void) {
 
 	int address = 0;				// 주소 저장 (dump 함수시 필요)
-	int progAddr = 0x00;
-	 
 
 	HistoryList historyL;			// history를 저장할 list 	
 	OpcodeTable* opcodeT;			// opcode들을 저장할 table
+	BreakPointList breakP;			// break point linked list 생성 
 
 	/* Initializing 과정 */
 	reset(memory);							// 메모리를 0으로 초기화한다. 
 	historyL.head = historyL.curr = NULL;   // history list의 head와 현재 node pointer 초기화 
 	readOp(&opcodeT);						// opcode.text를 불러와 opcode table에 저장한다. 
+	breakP.head = breakP.curr = NULL;		// break point 초기화
 
 	while (TRUE) {
 		/* 명령어를 저장할 배열 : 명령어, 첫번째 인자, 두번째 인자, 세번째 인자 */
@@ -31,7 +31,7 @@ int main(void) {
 		argCount = refineArgument(arguments, first, second, third); // 인수정리
 
 		// 0. argument가 잘못된 경우 
-		if (argCount == -1)
+		if (strcmp("loader", command) && argCount == -1)
 			printf("Please check the arguments.\n");
 		// 1. help 명령어 수행 
 		else if (!strcmp("help", command) || !strcmp("h", command)) {
@@ -87,12 +87,10 @@ int main(void) {
 		else if (!strcmp("reset", command)) {
 			if (argCount != 0) // argument가 있을 경우 : 예외처리 
 				printf("No arguments required. Please try again.\n");
-			else{
+			else {
 				reset(memory);
-				execAddr = -1;	
-				lastProgAddr = -1;
-				lastProgLen = 0;
-			}	
+				execAddr = -1;
+			}
 		}
 		// 9. opcode 명령어 수행 
 		else if (!strcmp("opcode", command)) {
@@ -134,17 +132,20 @@ int main(void) {
 			if (argCount != 1) // argument가 1개가 아닐 경우 : 예외처리
 				printf("Please check the arguments.\n");
 			else
-				progaddr(command, &historyL);
+				progaddr(command, first, &historyL);
 		}
 		// 15. loader 명령어 수행 
-		else if (!strcmp("loader", command) ) {
+		else if (!strcmp("loader", command)) {
+			memset(first, '\0', MAX_STR);
+			memset(second, '\0', MAX_STR);
+			memset(third, '\0', MAX_STR);
+			argCount = sscanf(arguments, "%s %s %s", first, second, third);
 			if (argCount > 3) // argument가 3개 이상일 경우 : 예외처리
 				printf("There are many object files.\n");
-			else if (argCount < 1) // argument가 1개 이하일 경우 : 예외처리
+			else if (argCount <= 0) // argument가 1개 이하일 경우 : 예외처리
 				printf("Please check the arguments.\n");
-			else{
-				loader(command, &historyL);
-				firstExecAddr = execAddr;
+			else {
+				loader(argCount, command, first, second, third, &historyL);
 			}
 		}
 		// 16. run 명령어 수행
@@ -152,15 +153,15 @@ int main(void) {
 			if (argCount != 0) // argument가 있을 경우 : 예외처리
 				printf("No arguments required. Please try again.\n");
 			else
-				run(command, &historyL);
+				run(); // 구현하지 못함.. 
 		}
 		// 17. bp
 		else if (!strcmp("bp", command)) {
 			if (argCount > 1) // argument가 1개 이상일 경우 : 예외처리
 				printf("Please check the arguments.\n");
 			else
-				bp(command, &historyL);
-		}		
+				bp(command, first, &historyL, &breakP);
+		}
 		// 18. 그 외 
 		else {
 			printf("Please check command.\n");
@@ -301,31 +302,31 @@ void help(char* input, HistoryList* historyL) {
 void dir(char* input, HistoryList* historyL) {
 	writeHistory(input, &historyL);		// history List에 저장
 
-	DIR *di;
-	struct dirent *direntPtr;
+	DIR* di;
+	struct dirent* direntPtr;
 	struct stat info;
 	int line = 0;
 	char name[100];
 
 	di = opendir(".");
 
-	while((direntPtr = readdir(di)) != NULL){
+	while ((direntPtr = readdir(di)) != NULL) {
 		strcpy(name, direntPtr->d_name);
 
 		// '.' , '..' 파일의 경우에는 출력을 생략한다.
-		if(strcmp(name,".") == 0 || strcmp(name,"..") == 0)
+		if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
 			continue;
-		lstat(name,&info);
-		printf("%20s",name);
+		lstat(name, &info);
+		printf("%20s", name);
 		line++;
 
 		// 디렉터리의 경우에는 파일이름 끝에 '/' 을 붙인다.
-		if(S_ISDIR(info.st_mode))
+		if (S_ISDIR(info.st_mode))
 			printf("/");
 		// 실행파일의 경우에는  파일이름 끝에 '*' 을 붙인다.
-		else if(S_IEXEC & info.st_mode)
+		else if (S_IEXEC & info.st_mode)
 			printf("*");
-		if(line % 3 == 0)
+		if (line % 3 == 0)
 			printf("\n");
 
 	}
@@ -377,8 +378,8 @@ void writeHistory(char* content, HistoryList** historyL) {
 }
 
 /* 4-2. history 현재까지 사용한 명령어 리스트 출력*/
-void printHistory(HistoryList* historyL){
-	
+void printHistory(HistoryList* historyL) {
+
 	int i = 1;
 	HistoryNode* tmpNode = historyL->head;	// 프린트하기 위해 임시 history node pointer를 head로 지정
 
@@ -554,18 +555,13 @@ char asciiCode(int hex) {
 }
 
 /* 3. edit : 첫번째 인자(주소)에 두번째 인자(value)로 해당 메모리 값을 수정한다. */
-void edit(char* command, char* first, char* second, HistoryList* historyL, unsigned char(*memory)[COL_SIZE]){
+void edit(char* command, char* first, char* second, HistoryList* historyL, unsigned char(*memory)[COL_SIZE]) {
 
 	int address, value;		// 주소와 변경 값 
 	int col, row;			// 행렬 
 
 	// history에 저장하기 위해 명령어를 command + argument 합쳐서 저장
 	char input[MAX_STR];
-	strcpy(input, command);
-	strcat(input, " ");
-	strcat(input, first);
-	strcat(input, ", ");
-	strcat(input, second);
 
 	// argument들이 적절한 범위 내에 없을 경우 - 예외 처리 
 	if (checkRange(first) == FALSE || checkRange(second) == FALSE)
@@ -584,8 +580,15 @@ void edit(char* command, char* first, char* second, HistoryList* historyL, unsig
 			printf("Please check the value.\n");
 		// 정상을 경우	
 		else {
-			if(!(strcmp(command,"")))
+			if (command != NULL) {
+				strcpy(input, command);
+				strcat(input, " ");
+				strcat(input, first);
+				strcat(input, ", ");
+				strcat(input, second);
 				writeHistory(input, &historyL); // history 기록 
+			}
+				
 			row = address / COL_SIZE;		// 주소를 16 나눈 몫 
 			col = address % COL_SIZE;		// 주소를 16 나눈 나머지 
 			memory[row][col] = value;		// 해당 memory 수정 
@@ -597,8 +600,8 @@ void edit(char* command, char* first, char* second, HistoryList* historyL, unsig
 }
 
 /* 4. fill : 첫번째 인자(시작)과 두번째 인자(끝) 사이를 세번째 인자(값)으로 수정한다. */
-void fill(char* command, char* first, char* second, char* third, HistoryList* historyL, unsigned char(*memory)[COL_SIZE]){
-	
+void fill(char* command, char* first, char* second, char* third, HistoryList* historyL, unsigned char(*memory)[COL_SIZE]) {
+
 	int start, end, value;	// 시작, 끝, 변경 값 
 
 	// history에 저장하기 위해 명령어를 command + argument 합쳐서 저장
@@ -658,8 +661,8 @@ void fillMemory(unsigned char(*memort)[COL_SIZE], int start, int end, int value)
 }
 
 /* 5. memory 관련 함수 중 dump,deit,fill에 입력된 값이 범위내에 있는지 확인 */
-int checkRange(char* arg){
-	
+int checkRange(char* arg) {
+
 	int i, len = strlen(arg) - 1;
 	for (i = 0; i < len; i++) {
 		if (arg[i] >= 0x30 && arg[i] <= 0x39) {} // 0 ~ 9
@@ -1372,7 +1375,7 @@ int pass2(char* filename, OpcodeTable* opTable, SymbolTable* symtab, int start, 
 			format = findFormat(opTable, tmp1);
 			oper1 = strtok(tmp2, ",");
 			oper2 = strtok(NULL, "\n");
-			opc = findObject(tmp1, oper1, oper2, loc, baseReg, format, opTable, symtab, & immflag);
+			opc = findObject(tmp1, oper1, oper2, loc, baseReg, format, opTable, symtab, &immflag);
 			if ((format != -1) && opc != -1) {
 				strcpy(tmp3, oper1);
 				if (oper2 != NULL) {
@@ -1456,7 +1459,7 @@ int pass2(char* filename, OpcodeTable* opTable, SymbolTable* symtab, int start, 
 		if (format == 4) {
 			sprintf(objectcode, "%08X", opc);
 			int curloc = strtol(loc, NULL, 16);
-			if(immflag == 0)
+			if (immflag == 0)
 				writeModifynode(curloc - start + 1, &modiflist);		// modification list에 저장한다.
 		}
 		else if (format == 3)	sprintf(objectcode, "%06X", opc);
@@ -1656,7 +1659,7 @@ int chkRegister(char* oper) {
 }
 
 /* 9. objectcode를 계산하는 함수  */
-int findObject(char* opcode, char* oper1, char* oper2, char* loc, int baseReg, int format, OpcodeTable* opTable, SymbolTable* symtab,int * imm) {
+int findObject(char* opcode, char* oper1, char* oper2, char* loc, int baseReg, int format, OpcodeTable* opTable, SymbolTable* symtab, int* imm) {
 
 	int objcode = 0;											// opcode mnem을 저장할 변수
 	int n = 0, i = 0, x = 0, b = 0, p = 0, e = 0;	// nixbpe bit를 저장할 변수
@@ -1838,7 +1841,7 @@ void fileModifynode(FILE* fwp, ModifList* modiflist) {
 
 /* 12. ModifList에 저장된 모든 노드를 free한다.  */
 void freeModifynode(ModifList** modiflist) {
-	
+
 	// 삭제에 사용될 modifnode
 	ModifNode* deleteNode = (*modiflist)->head;
 
@@ -1855,215 +1858,38 @@ void freeModifynode(ModifList** modiflist) {
 	return;
 }
 
+/* ============ progaddr 관련 함수 ============ */
+/* 1. 프로그램 시작 주소를 지정한다. */
+void progaddr(char* command, char* first, HistoryList* historyL) {
 
-void progaddr(char *command, char *first, HistoryList* historyL){
-	
 	// history에 저장하기 위해 명령어를 command + argument 합쳐서 저장
 	char input[MAX_STR] = { '\0', };			// history에 저장하기 위한 명령어 저장배열
 	strcpy(input, command);
 	strcat(input, " ");
 	strcat(input, first);
-	
-	if(checkConstantRange(first) == TRUE){
-		sscanf(first, "%x", &progAddr);
+
+	if (checkConstantRange(first) == TRUE) { // 범위내에 있을 경우 
+		sscanf(first, "%x", &progAddr);		// 주소값으로 지정 
 		writeHistory(input, &historyL);		// history List에 저장	
 	}
-	else{
+	else { //범위 초과시 에러 출력 
 		printf("progAddr range is not correct.\n");
 	}
-	
+
 	return;
 }
 
-void bp(char *command, char* first, HistoryList *_hl, BreakPointList *_bpl){
+/* ============ loader 관련 함수 ============ */
+/* 1. external symbol table 초기화. */
+void initExSymTable(ExSymbolTable** exSymT) {
 
-	// history에 저장하기 위해 명령어를 command + argument 합쳐서 저장
-	char input[MAX_STR] = { '\0', };			// history에 저장하기 위한 명령어 저장배열
-	strcpy(input, command);
-	strcat(input, " ");
-	strcat(input, first);
-	
-	int i;
-	int loc;		// locate of break point
-
-	if (first == NULL) {
-		printBreakPoint(*breakP);
-	}
-	else {
-		if(!strcmp("clear", first))
-			freeBreakPointList(_bpl);
-		else{
-			for (i = 0; i < (int)strlen(first); i++) { // 0 ~ 9 , A ~ F , a ~ f
-				if ((constant[i] >= 0x30 && constant[i] <= 0x39) || (constant[i] >= 0x41 && constant[i] <= 0x46) || (constant[i] >= 0x61 && constant[i] <= 0x66))
-					continue;
-				else{
-					printf("Argument is not correct. (address(hex) or 'clear')\n");
-					return;
-				}
-			}
-			sscanf(first, "%x", &loc);
-			writeBreakPointList(loc, 0, _bpl);
-			printf("	[ok] create breakpoint %04X\n", loc);
-		}
-	}
-
-	writeHistory(input, &historyL);		// history List에 저장
-	return;
-}
-
-void printBreakPoint(BreakPointList *breakP){
-	
-	BreakPointNode *tmpNode = breakP.head;
-
-	printf("\tbreakpoint\n");
-	printf("\t----------\n");
-	while (tmpNode != NULL) {
-		printf("\t%04X\n", tmpNode->loc);
-		tmpNode = tmpNode->next;
-	}
-	return;
-}
-
-void writeBreakPoint(int location, BreakPointList *breakP){
-
-	BreakPointNode *prev;
-	BreakPointNode *tmpNode = (BreakPointNode*)malloc(sizeof(BreakPointNode));
-
-	tmpNode->next = NULL;
-	tmpNode->loc = location;
-
-	if (breakP->head == NULL) {
-		breakP->head = breakP->curr = tmpNode;
-	}
-	else if(breakP->head->loc >= location){
-		if(breakP->head->loc == location){
-			free(tmpNode);
-			return;
-		}
-		tmpNode->next = breakP->head;
-		breakP->head = breakP->curr = tmpNode;
-	}
-	else {
-		breakP->curr = breakP->head->next;
-		prev = breakP->head;
-		
-		while(breakP->curr != NULL){
-			if(breakP->curr->loc == location){
-				free(tmpNode);
-				return;
-			}
-			else if(breakP->curr->loc > location){
-				prev->next = tmpNode;
-				tmpNode->next = breakP->curr;
-				breakP->curr = tmpNode;
-				return;
-			}
-			prev = breakP->curr;
-			breakP->curr = prev->next;	
-		}
-		prev->next = breakP->curr = tmpNode;
-	}
-	
-	return;
-}
-
-void freeBreakPointList(BreakPointList **breakP){
-	
-	// 삭제에 사용될 BreakPoint
-	BreakPointNode *deleteNode = (*breakP)->head;
-
-	// list에 저장된 모든 노드를 삭제한다. head는 그 다음 노드로 저장, delete 삭제 
-	while (TRUE) {
-		deleteNode = (*breakP)->head;
-		if (deleteNode != NULL) {
-			(*breakP)->head = deleteNode->next;
-			free(deleteNode);
-		}
-		else
-			break;
-	}
-	return;
-}
-
-void loader(char *command, char* first, char* second, char* third, HistoryList * historyL){
-	
-	ESHashTable *est;
-	initESHashTable(&est);
-	
-	int i, count = 0;
-	char tmp[MAX_STR] = { '\0', };
-	char files[3][MAX_STR];			// argument를 file name을 분리해서 저장하는 배열
-	char* filename;
-	char* type;
-
-	char input[MAX_STR] = { '\0', };			// history에 저장하기 위한 명령어 저장배열
-	strcpy(input, command);
-
-	
-	for(i = 0; i < 3; i++){
-		memset(tmp,'\0',MAXSTR);
-		memset(files[i],'\0',MAXSTR);
-		if (i == 0 && first != NULL){
-			strcat(input, " ");
-			strcat(input, first);
-			strcpy(tmp, first);
-		}
-		else if(i == 1 && second != NULL){
-			strcat(input, " ");
-			strcat(input, second);
-			strcpy(tmp, second);
-		}
-		else if (i == 2 && third != NULL){
-			strcat(input, " ");
-			strcat(input, third);
-			strcpy(tmp, third);
-		}
-		else break;
-		
-		count++;
-		filename = strtok(tmp,".");
-		strcpy(files[0],filename);
-		strcat(files[0],".");
-		type = strtok(NULL,"");
-		
-		if(strcmp(type,"obj")){
-			printf("The file type is not '*.obj'. please check again.\n");
-			return;
-		}
-		else{
-			strcat(files[i],type);
-		}		
-	}
-	
-	
-	if (loadPassOne() == 0) {
-		if (loadPassTwo() == 0) {
-			//printESTab(est, &*_lastProgLen);	// print ESTAB
-			//*_lastProgAddr = _progAddr;			// set start address of last loaded program
-		}
-		else{
-			freeESHashTable(&est);
-			return;
-		}
-	}
-	else{
-		freeESHashTable(&est);
-		return;
-	}
-
-	writeHistory(input, &historyL);		// history List에 저장
-	return;
-}
-
-void initExSymTable(ExSymbolTable *exSymT){
-	
 	int i;
 	*exSymT = (ExSymbolTable*)malloc(sizeof(ExSymbolTable) * 3);
 
 	// symbol Hash Table 초기화 
 	for (i = 0; i < 3; i++) {
 		(*exSymT)[i].cnt = 0;
-		(*exSymT)[i].csname = NULL;
+		strcpy((*exSymT)[i].csname, "");
 		(*exSymT)[i].length = 0;
 		(*exSymT)[i].address = 0;
 		(*exSymT)[i].node = NULL;
@@ -2072,67 +1898,68 @@ void initExSymTable(ExSymbolTable *exSymT){
 	return;
 }
 
-int findExSymbol(int csflag ,char *csname, char *label, ExSymbolTable *exSymT){
+/* 2. external symbol table 초기화. */
+int findExSymbol(int csflag, char* csname, char* label, ExSymbolTable** exSymT) {
+
+	int i;
+	SymbolNode* findNode;	// symbol 찾을 임시 node 
 	
-	int i, index = -1;
-	SymbolNode* findNode;		
-	
-	for(i = 0; i < 3, (*exSymT)[i].csname != NULL; i++){
-		if (!strcmp(csname, (*exSymT)[i].csname)){
-			if (csflag == 0) return (*exSymT)[i].address;
-			else{
-				index = i;
-				break;
+	// control section일 경우 - external table을 csname을 확인하여 찾는다. 
+	if (csflag == 0) {
+		for (i = 0; i < 3 && strcmp((*exSymT)[i].csname, ""); i++) {
+			if (!strcmp(csname, (*exSymT)[i].csname))
+				return (*exSymT)[i].address;
+		}
+	}
+	else { // symbol일 경우, external table의 node을 순회하여 찾는다. 
+		for (i = 0; i < 3; i++) {
+			findNode = (*exSymT)[i].node;
+			while (findNode != NULL) {
+				if (!strcmp(label, (findNode)->label))
+					return findNode->location;
+				findNode = findNode->next;
 			}
 		}
 	}
-	
-	if(csflag == 0) return -1;
-	else{
-		if (index == -1) return -1;
-		for (findNode = exSymT[index].node; findNode != NULL; findNode = (findNode)->next) {
-			if (!strcmp(label, (findNode)->label))
-				return findNode->location;
-		}
-	}
+	return -1;
 }
 
-void makeExSymbol(int flag, int index ,char *csname, char *label, int addr, int len, ExSymbolTable *exSymT){
-	
-	int i;							// hash index 를 저장
-	SymbolNode* tmpNode;	// 새로운 값을 저장할 SymbolNode pointer 생성
+/* 3. external symbol table 생성. */
+void makeExSymbol(int csflag, int index, char* csname, char* label, int addr, int len, ExSymbolTable** exSymT) {
 
-	tmpNode = (SymbolNode*)malloc(sizeof(SymbolNode));
-	tmpNode->next = NULL;
-	strcpy(tmpNode->label, label);
-	tmpNode->location = location;
-	tmpNode->index = index;
+	SymbolNode* tmpNode;	// 새로운 값을 저장할 SymbolNode pointer 생성
 	
-	if(flag == 0){
+	// control section의 경우 : external table에 저장한다. 
+	if (csflag == 0) {
 		strcpy((*exSymT)[index].csname, csname);
-		(*exSymT)[i].length = len;
-		(*exSymT)[i].length = addr;
-		
+		(*exSymT)[index].length = len;
+		(*exSymT)[index].address = addr;
 	}
-	else{
-		// 정상일 경우 symTab의 새로운 노드를 추가한다.
+	else {	// 아닐 경우, symbol node을 추가하고 external table의 node에 연결한다. 
+		tmpNode = (SymbolNode*)malloc(sizeof(SymbolNode));
+		tmpNode->next = NULL;
+		strcpy(tmpNode->label, label);
+		tmpNode->location = addr;
+		tmpNode->index = index;
+
+		// 기존에 저장된 node가 없는 경우  
 		(*exSymT)[index].cnt++;
-		if ((*exSymT)[index].node == NULL) {	// 기존에 저장된 node가 없는 경우
+		if ((*exSymT)[index].node == NULL) {
 			(*exSymT)[index].node = tmpNode;
 			(*exSymT)[index].last = tmpNode;
 		}
 		else {
 			((*exSymT)[index].last)->next = tmpNode;
-			(*exSymT)[index].last) = tmpNode;
+			(*exSymT)[index].last = tmpNode;
 		}
 	}
-	
 	return;
 }
 
-void freeExSymbolTable(ExSymbolTable *exSymT){
-	
-	SymbolNode* deleteN;	
+/* 4. external symbol table free. */
+void freeExSymbolTable(ExSymbolTable** exSymT) {
+
+	SymbolNode* deleteN = NULL;		// 삭제할 symbol node 
 	int i;
 
 	// 만약 external symbol table이 비어있을 경우 해당 함수를 빠져나간다.
@@ -2148,322 +1975,570 @@ void freeExSymbolTable(ExSymbolTable *exSymT){
 			(*exSymT)[i].cnt--;
 		}
 	}
-	
+
 	free(*exSymT);
 	return;
 
 }
 
-void printExSymbol(ExSymbolTable *exSymT, int *_progLen){
+/* 5. external symbol table 출력. */
+void printExSymbol(int count, ExSymbolTable* exSymT) {
+
+	SymbolNode* tmpNode = NULL;		// symbol을 순회할 node 
+
+	int total = 0;		// total 길이
+	int i;
+
+	// print 한다.  
+	printf("control      symbol       address      length       \n");
+	printf("section      name \n");
+	printf("--------------------------------------------------------\n");
 	
-	SymbolNode* tmpNode;
-	SymbolNode* tmpNode2;
-	
-	int index;			// dynamic array index
-	int total = 0;		// total length
-	int i, j;
-	
-	// print symbols
-	printf("\tcontorl \tsymbol  \taddress \tlength  \t\n");
-	printf("\tsection \tname    \t        \t        \t\n");
-	printf("\t--------------------------------------------------------\n");
-	
-	for(i = 0; i < 3; i++){
-		if((*exSymT)[i].node != NULL){
-			printf("\t%-8s\t%-8s\t%04X    \t%04X    \n", (*exSymT)[i].csName, "", (*exSymT)[i].address, (*exSymT)[i].length);			
-			total += (*exSymT)[i].length;
-			tmpNode = tmpNode2 = (*exSymT)[i].node;
-			while(tmpNode != NULL){
-				printf("\t%-8s\t%-8s\t%04X    \t        \n", "", tmpNode->label, tmpNode->location);
-				tmpNode2 = tmpNode->next;
-				tmpNode = tmpNode2;
-			}
-			printf("\t--------------------------------------------------------\n");
-			printf("\t%-8s\t%-8s\ttotal length\t%04X\n", "", "", total);
-			
+	// load한 파일의 external symbol을 출력한다.  
+	for (i = 0; i < count; i++) {
+		// control section 출력 
+		printf("%-8s     %-8s     %04X         %04X         \n", (exSymT)[i].csname, "", (exSymT)[i].address, (exSymT)[i].length);
+		total += (exSymT)[i].length;
+		
+		// symbol 부분 출력 
+		tmpNode = (exSymT)[i].node;
+		while (tmpNode != NULL) {
+			printf("%-8s     %-8s     %04X\n", "", tmpNode->label, tmpNode->location);
+			tmpNode = tmpNode->next;
 		}
 	}
+	
+	// 전체 길이를 출력한다. 
+	printf("--------------------------------------------------------\n");
+	printf("%-8s     total        length       %04X\n","",total);
 	free(tmpNode);
-	free(tmpNode2);
-	//*_progLen = totalLen;
 	return;
 }
 
-int loadPass1(char(*files)[MAX_ARG_LEN], int count, int progAddr, ExSymbolTable *exSymT){
+/* 6. loader 함수 - loadpass1, pass2 호출 */
+void loader(int arg, char* command, char* first, char* second, char* third, HistoryList* historyL) {
 
-	FILE *fp[3];		// file pointer for reading obj files
-	char input[MAX_BUFR];
-	char text[7];	// text for reading file 
-	char tmp[7];	// addr for reading file
-	char csname[7];
-	char *head;
-	
-	int address;
-	int length;
-	int cAddr = progAddr;		// address of control section
-	int i, j, k, h;
+	ExSymbolTable* exSymT;			// external symbol table 생성 
+
+	int i;  
+	char tmp[MAX_STR] = { '\0', };	// 임시 저장 배열 
+	char files[3][MAX_STR];			// argument를 file name을 분리해서 저장하는 배열
+	char* filename, * type;			// 파일명과 type을 저장할 배열포인터 
+
+	char input[MAX_STR] = { '\0', };			// history에 저장하기 위한 명령어 저장배열
+	strcpy(input, command);
+
+	initExSymTable(&exSymT);		// external table 초기화 
+
+	// argument로 받은 배열를 파일명으로 분리 
+	for (i = 0; i < arg; i++) {
+		memset(tmp, '\0', MAX_STR);
+		memset(files[i], '\0', MAX_STR);
+		if (i == 0) {
+			strcat(input, " ");
+			strcat(input, first);
+			strcpy(tmp, first);
+		}
+		else if (i == 1) {
+			strcat(input, " ");
+			strcat(input, second);
+			strcpy(tmp, second);
+		}
+		else if (i == 2) {
+			strcat(input, " ");
+			strcat(input, third);
+			strcpy(tmp, third);
+		}
+
+		filename = strtok(tmp, ".");
+		strcpy(files[i], filename);
+		strcat(files[i], ".");
+		type = strtok(NULL, "");
+		
+		// type 확인 
+		if (strcmp(type, "obj")) {
+			printf("The file type is not '*.obj'. please check again.\n");
+			return;
+		}
+		else { // files 배열에 저장 
+			strcat(files[i], type);
+		}
+	}
+
+	// pass1 호출 
+	if (loadPass1(files, arg, &exSymT) != -1) {
+		if (loadPass2(files, arg,&exSymT) != -1) { // pass 2 호출 
+			printExSymbol(arg, exSymT);			 // external table 출력	
+			writeHistory(input, &historyL);			 // history List에 저장
+		}
+	}
+
+	freeExSymbolTable(&exSymT); 	// external table free 
+}
+
+/* 7. loadpass1 과정 수행 - exsymbol 생성 */
+int loadPass1(char(*files)[MAX_STR], int count, ExSymbolTable** exSymT) {
+
+	FILE* fp;				// 파일포인터 
+	char input[MAX_BUFR];	// 파일 내용 저장 배열 
+	char text[7], tmp[7]; 	// 임시 저장 배열 
+	char csname[7];			// control section name 저장배열 
+	char* head;				// 헤더 외를 지칭하는 배열 포인터 
+	int address;			// 임시 주소값 저장 
+	int length;				// 길이 저장 
+	int csAddr = progAddr;	// control section 주소
+	int i, j, k;
 
 	for (i = 0; i < count; i++) {
-		
 		memset(csname, '\0', 7);
 		fp = fopen(files[i], "r");
+		// 파일이 존재하지 않을 경우 - 에러처리 
 		if (fp == NULL) {
-			printf("%s file does not exist.\n",files[i]);
+			printf("%s file does not exist.\n", files[i]);
 			return -1;
 		}
-		
+
 		while (fgets(input, MAX_BUFR, fp)) {
 
 			memset(text, '\0', 7);
 			memset(tmp, '\0', 7);
-
+			
+			// header 부분 
 			if (input[0] == 'H') {
+				// 1~6번째 cs name 추출 
 				for (j = 1; j < 7; j++) {
 					if (input[j] == ' ')
 						break;
 					text[j - 1] = input[j];
 				}
-				strcpy(csname,text);
+				strcpy(csname, text);
 				
+				// 7~12번째 시작주소 추출 	
 				for (j = 7; j < 13; j++)
 					tmp[j - 7] = input[j];
 				sscanf(tmp, "%x", &address);
+				// control section 주소에 더하기 
 				csAddr += address;
-				
+
 				memset(tmp, '\0', 7);
+				// 13~18번째 길이 
 				for (j = 13; j < 19; j++)
 					tmp[j - 13] = input[j];
 				sscanf(tmp, "%x", &length);
-
-				if (findExSymbol(0,text,"",exSymT) != -1) {
+				
+				// external symbol에 이미 존재할 경우 
+				if (findExSymbol(0, text, NULL, exSymT) != -1) {
 					printf("Duplicate external symbol.\n");
 					return -1;
 				}
 				else {
-					makeExSymbol(0, i, csname, "", csAddr, length, exSymT);
+					// 없을 경우, 추가 
+					makeExSymbol(0, i, text, NULL, csAddr, length, exSymT);
 				}
+				break;
 			}
 		}
 
 		while (fgets(input, MAX_BUFR, fp)) {
-			if(input[0] == '.')
+			if (input[0] == '.')
 				continue;
-			else if(input[0] == 'E')		
+			else if (input[0] == 'E')
 				break;
-				
+			// Define Record 출력 
 			else if (input[0] == 'D') {
 				head = &input[1];
-				for(k = 0; k < strlen(head); k++){
+				for (k = 0; k < (int)strlen(head)-1; k++) {
 					memset(text, '\0', 7);
 					memset(tmp, '\0', 7);
-
-					for(j = 0+k; j < 6+k; j++){
-						if(head[j] == ' ') break;
-						text[j-k] = head[j];
+					
+					// name 추출 
+					for (j = 0 + k; j < 6 + k; j++) {
+						if (head[j] == ' ') 
+							break;
+						text[j - k] = head[j];
 					}
-					for(j = 6+k; j < 12+k; j++){
-						tmp[j-6-k] = head[j];
+					// 주소 추출 
+					for (j = 6 + k; j < 12 + k; j++) {
+						tmp[j - 6 - k] = head[j];
 					}
 					sscanf(tmp, "%x", &address);
-					
-					if (findExSymbol(1,csname,text,exSymT) != -1) {
+
+					if (findExSymbol(1, csname, text, exSymT) != -1) {
 						printf("Duplicate external symbol.\n");
 						return -1;
 					}
 					else {
-						makeExSymbol(1, i, csname, text, csAddr+address, 0, exSymT);
+						// 추가  
+						makeExSymbol(1, i, csname, text, csAddr + address, 0, exSymT);
 					}
-					k = j-1;
+					k = j - 1;
 				}
 			}
 		}
-		csAddr += length;	
+		csAddr += length;
 		fclose(fp);
 	}
 	return 0;
 }
 
-int loadPass2(char(*_arg)[MAX_ARG_LEN], int count, int progAddr, ExSymbolTable *exSymT, int *execAddr){
-	
-	FILE *fp[3];		// file pointer for reading obj files
-	char input[MAX_BUFR];
-	char text[7];	// text for reading file 
-	char tmp[7];	// addr for reading file
-	char *head;
-	
-	int address;
-	int length;
-	int csAddr = progAddr;		// address of control section
-	int i, j, k, h;
+/* 8. loadpass2 과정 수행 - exsymbol 생성 */
+int loadPass2(char(*files)[MAX_STR], int count, ExSymbolTable** exSymT) {
 
-	RefSymbolList refSymL;	// reference symbols list
-	RefSymbolNode *tmpref = NULL;
-	char oper;
-	int symVal;		// value(address) of symbol
-	int refcount;
-	int refNum;	// reference symbol number
-	int rAddr;	// start address of record
-	int rLen;		// length of record
-	int objCode;	// object code
-
+	FILE* fp;						// 파일포인터 
+	RefSymbolList refSymL;			// reference symbols list 생성 
+	RefSymbolNode* tmpref = NULL;	// 순회할 refSymbol Node 
 	
+	char input[MAX_BUFR];		// 파일 내용 저장 배열 
+	char text[7], tmp[7]; 		// 임시 저장 배열 
+	char csname[7];				// control section name 저장배열 
+	char* head;					// 헤더 외를 지칭하는 배열 포인터 
+	int address;				// 임시 주소값 저장 
+	int length;					// 길이 저장 
+	int csAddr = progAddr;		// control section 주소
+
+	char oper;			// operator 
+	int symAddr;		// symbol의 주소값 저장
+	int refNum;			// reference symbol number
+	int rAddr;			// record의 주소
+	int rLen;			// record의 길이 
+	int objCode;		// object code 저장 
+	int modifnum;		// modification 저장 
+	int editnum;		// edit num 저장 
+	int row, col;		// 행과 열 
+	int i, j, k;
+
+
 	refSymL.head = refSymL.last = NULL;
-	csAddr = *extcAddr = progAddr;
-	
+	csAddr = execAddr = progAddr;
+
 	for (i = 0; i < count; i++) {
-		
 		fp = fopen(files[i], "r");
-		if (fp == NULL) {
-			printf("%s file does not exist.\n",files[i]);
-			return -1;
-		}
-		refSymCnt = 0;
-		
+
 		while (fgets(input, MAX_BUFR, fp)) {
 
 			memset(text, '\0', 7);
 			memset(tmp, '\0', 7);
-
+			// header 부분  
 			if (input[0] == 'H') {
+				// control section name 추출 
 				for (j = 1; j < 7; j++) {
 					if (input[j] == ' ')
 						break;
 					text[j - 1] = input[j];
 				}
+				strcpy(csname, text);
 				
+				// 시작 주소 추출 
 				for (j = 7; j < 13; j++)
 					tmp[j - 7] = input[j];
 				sscanf(tmp, "%x", &address);
 				csAddr += address;
+
+				// reference symbol 추가 
+				makeRefSymbol(1, text, &refSymL);
 				
-				// write reference symbol & number in list
-				makeRefSymbol(++refcount, text, &refSymL);
-				
+				// 길이 추출 
 				memset(tmp, '\0', 7);
 				for (j = 13; j < 19; j++)
 					tmp[j - 13] = input[j];
 				sscanf(tmp, "%x", &length);
-
 			}
+			break;
 		}
-		
+
 		while (fgets(input, MAX_BUFR, fp)) {
-			
-			if(input[0] == '.')
+
+			if (input[0] == '.')
 				continue;
-			else if(input[0] == 'E'){
+			else if (input[0] == 'E') {
 				memset(tmp, '\0', 7);
 				if (strlen(input) > 1) {
 					for (j = 1; j < 7; j++)
-						tmp[j - 1] = buf[j];
-					sscanf(tmp, "%x", &refAddr);
-					*execAddr = csAddr + refAddr;
+						tmp[j - 1] = input[j];
+					sscanf(tmp, "%x", &address);
+					execAddr = csAddr + address;
 				}
 				csAddr += length;
 				break;
-				
 			}
-				
-			if (input[0] == 'R') {
+			// reference record 추출 
+			else if (input[0] == 'R') {
 				head = &input[1];
-				for(k = 0; k < strlen(head); k++){
+				for (k = 0; k < (int)strlen(head); k= k+8) {
 					memset(text, '\0', 7);
 					memset(tmp, '\0', 7);
 					refNum = 0;
-
-					for(j = 0+k; j < 2+k; j++){
-						text[j-k] = head[j];
+					// reference number 
+					for (j = 0 + k; j < 2 + k; j++) {
+						text[j - k] = head[j];
 					}
 					sscanf(text, "%x", &refNum);
 					
-					for(j = 2+k; j < 8+k; j++){
-						if(head[j] == ' ') break;
-						tmp[j-2-k] = head[j];
+					// reference name 
+					for (j = 2 + k; j < 8 + k; j++) {
+						if (head[j] == ' ' || head[j] == '\n'){
+							break;
+						}
+						tmp[j - 2 - k] = head[j];
 					}
-					makeRefSymbol(++refcount, tmp, &refSymL);	
-					k = j-1;
+					makeRefSymbol(refNum, tmp, &refSymL);
 				}
 			}
+			// text record 메모리에 추가 
 			else if (input[0] == 'T') {
 				rAddr = rLen = 0;
-				sscanf(input+1, "%6x%2x", &rAddr, &rLen);
-				for (j = 0; j < rLen; j+=2) {
-					sscanf(input+9+j, "%2x", &objCode);
-					edit("",csAddr + recAddr + j, objCode, NULL, (*memory)[COL_SIZE]);
+				sscanf(input + 1, "%6x%2x", &rAddr, &rLen);
+				for (j = 0; j < rLen; j++) {
+					memset(text, '\0', 7);
+					memset(tmp, '\0', 7);
+					sscanf(input + 9 + j*2, "%2x", &objCode);
+					sprintf(text, "%x", csAddr + rAddr + j);
+					sprintf(tmp, "%x", objCode);
+					edit(NULL, text, tmp, NULL, memory);
 				}
 			}
+			// modification record 추출 
 			else if (input[0] == 'M') {
 				memset(text, '\0', 7);
 				memset(tmp, '\0', 7);
+				// 정제작업 
 				sscanf(input + 1, "%6x%2x%c%x", &rAddr, &rLen, &oper, &refNum);
 				
-				reftmp = refSymL.head;
-				while(reftmp != NULL){
-					if(reftmp->refnum == refNum){
-						strcpy(text,reftmp->symbol);
+				// reference number으로 refer symbol list에서 symbol name 찾기  
+				tmpref = refSymL.head;
+				while (tmpref != NULL) {
+					if (tmpref->refnum == refNum) {
+						strcpy(text, tmpref->symbol);
 						break;
 					}
-					reftmp = reftmp->next;
+					tmpref = tmpref->next;
 				}
-				if (searchESHashTable(text, *_est)) {
-					// found: add or subtract symbol value at location
-					symVal = returnSymbolValueFromESTab(text, *_est);
-					setModificationValue(csAddr + recAddr, recLen, symVal, op, _mem);
-					
-					if (errorFlag == -2) {
-						printf("! Modification field overflow\n");
-						return errorFlag;
-					} 
-					else if (errorFlag == -3) {
-						printf("! Invalid operator\n");
-						return errorFlag;
-					}
+				
+				// reference number가 1일 경우 프로그램 name	
+				if (refNum == 1) {
+					symAddr = findExSymbol(0, text, NULL, exSymT);
 				}
 				else {
-				// not found: set error flag
-					printf("! Undefined external symbol\n");
-					errorFlag = -1;
-					return errorFlag;
+					// 아닐 경우 external symbol table에서 찾기 
+					symAddr = findExSymbol(1, csname, text, exSymT);
+				}
+				
+				// symbol address를 찾은 경우 
+				if (symAddr != -1) {
+					modifnum = 0;
+					
+					// half byte가 5일 경우 
+					if (rLen == 5) {
+						row = (csAddr + rAddr) / COL_SIZE;		// 주소를 16 나눈 몫 
+						col = (csAddr + rAddr) % COL_SIZE;		// 주소를 16 나눈 나머지 
+						modifnum += memory[row][col] % 16; // [csAddr+rAddr]%16;
+						editnum = 0xFFFFF;
+					}
+					else if (rLen == 6)
+						editnum = 0xFFFFFF;
+				}
+				else { // 찾을 수 없는 경우 
+					printf("external symbol cannot found.\n");
+					return -1;
+				}
+				
+				// modify 할 부분 저장 
+				for (k = csAddr + rAddr + rLen % 2; k < csAddr + rAddr + 3; k++) {
+					row = k / COL_SIZE;		// 주소를 16 나눈 몫 
+					col = k % COL_SIZE;		// 주소를 16 나눈 나머지 
+					modifnum <<= 4;
+					modifnum += memory[row][col] / 0x10;
+					modifnum <<= 4;
+					modifnum += memory[row][col] % 0x10;
+				}
+				
+				
+				// operator 실행 
+				if (oper == '+')
+					modifnum += symAddr;
+				else if (oper == '-')
+					modifnum -= symAddr;
+				else {
+					printf("operator is not correct.\n");
+					return -1;
+				}
+
+				// modify 한 memory에서 수정 
+				modifnum &= editnum;
+				for (k = 2; k >= rLen % 2; k--) {
+					row = (k + csAddr + rAddr) / COL_SIZE;		// 주소를 16 나눈 몫 
+					col = (k + csAddr + rAddr) % COL_SIZE;		// 주소를 16 나눈 나머지 
+					memory[row][col] = modifnum % 0x100;
+					modifnum >>= 8;
+				}
+				// half byte가 5일 경우 추가 작업 
+				if (rLen % 2 == 1) {
+					row = (csAddr + rAddr) / COL_SIZE;		// 주소를 16 나눈 몫 
+					col = (csAddr + rAddr) % COL_SIZE;		// 주소를 16 나눈 나머지
+					memory[row][col] /= 16;
+					memory[row][col] *= 16;
+					memory[row][col] += modifnum % 0x10;
 				}
 			}
 		}
-
+		// refer symbol list 해제 
 		refSymL.head = refSymL.last = NULL;
 		freeRefSymbol(&refSymL);
-
 		fclose(fp);
 	}
-
-	return -1;
+	return 0;
 }
 
-void makeRefSymbol(int refnum, char *symbol, RefSymbolList *refSymL){
+void makeRefSymbol(int refnum, char* symbol, RefSymbolList* refSymL) {
+
+	RefSymbolNode* tmpNode = (RefSymbolNode*)malloc(sizeof(RefSymbolNode));  // 새로 저장할 refer symbol node 
 	
-	RefSymbolNode *tmpNode = (RefSymbolNode *)malloc(sizeof(RefSymbolNode));
+	// 값을 저장 
 	tmpNode->next = NULL;
 	tmpNode->refnum = refnum;
 	strcpy(tmpNode->symbol, symbol);
-
+	
+	// 아무것도 없을 경우 추가 
 	if (refSymL->head == NULL) {
 		refSymL->head = refSymL->last = tmpNode;
 	}
-	else {
+	else { // 있을 경우, last 부분에 연결 
 		refSymL->last->next = tmpNode;
 		refSymL->last = tmpNode;
 	}
 	return;
 }
 
-void freeRefSymbol(RefSymbolList *refSymL){
-	
-	RefSymbolNode *deleteNode = refSymL->head;
-	refSymL->last = NULL;
+void freeRefSymbol(RefSymbolList* refSymL) {
 
-	while (deleteNode != NULL){
-		 refSymL->head = deleteNode->next;
-		 free(deleteNode);
-		 deleteNode = refSymL->head;
-	}
+	RefSymbolNode* deleteNode = refSymL->head; 	// 삭제할 refer symbol node 
+	refSymL->last = NULL;
 	
+	// 삭제할 것이 없을 때까지 순회하며 삭제 
+	while (deleteNode != NULL) {
+		refSymL->head = deleteNode->next;
+		free(deleteNode);
+		deleteNode = refSymL->head;
+	}
+
 	return;
 }
+
+
+void bp(char* command, char* first, HistoryList* historyL, BreakPointList* breakP) {
+
+	// history에 저장하기 위해 명령어를 command + argument 합쳐서 저장
+	char input[MAX_STR] = { '\0', };			// history에 저장하기 위한 명령어 저장배열
+	strcpy(input, command);
+	strcat(input, " ");
+	strcat(input, first);
+
+	int i;
+	int loc;					// break point의 주소 
+	
+	// argument가 없을 경우 
+	if (strlen(first) == 0) {
+		// 출력 
+		printBreakPoint(breakP);
+	}
+	else {
+		if (!strcmp("clear", first))
+			freeBreakPointList(&breakP);
+		else {
+			// 범위 확인 
+			for (i = 0; i < (int)strlen(first); i++) { // 0 ~ 9 , A ~ F , a ~ f
+				if ((first[i] >= 0x30 && first[i] <= 0x39) || (first[i] >= 0x41 && first[i] <= 0x46) || (first[i] >= 0x61 && first[i] <= 0x66))
+					continue;
+				else {
+					printf("Argument is not correct. (address(hex) or 'clear')\n");
+					return;
+				}
+			}
+			// location 저장 
+			sscanf(first, "%x", &loc);
+			writeBreakPoint(loc, breakP);
+			printf("	[ok] create breakpoint %4X\n", loc);
+		}
+	}
+
+	writeHistory(input, &historyL);		// history List에 저장
+	return;
+}
+
+void printBreakPoint(BreakPointList* breakP) {
+
+	BreakPointNode* tmpNode = breakP->head; // 순회할 break point node 
+
+	printf("\tbreakpoint\n");
+	printf("\t----------\n");
+	// 없을 때까지 순회 
+	while (tmpNode != NULL) {
+		printf("\t%04X\n", tmpNode->loc);
+		tmpNode = tmpNode->next;
+	}
+	return;
+}
+
+void writeBreakPoint(int location, BreakPointList* breakP) {
+
+	BreakPointNode* prev;	// 이전을 저장 node 
+	
+	 // 새로 추가할 break point node 
+	BreakPointNode* tmpNode = (BreakPointNode*)malloc(sizeof(BreakPointNode));
+	tmpNode->next = NULL;
+	tmpNode->loc = location;
+
+	// 없을 경우 추가한다.  
+	if (breakP->head == NULL) {
+		breakP->head = breakP->curr = tmpNode;
+	}
+	// break point의 head location보다 작을 경우 새로운 head로 지정 
+	else if (breakP->head->loc >= location) {
+		if (breakP->head->loc == location) {
+			free(tmpNode);
+			return;
+		}
+		tmpNode->next = breakP->head;
+		breakP->head = breakP->curr = tmpNode;
+	}
+	else {
+		// 순회하며 오름차순으로 정렬하여 추가한다. 
+		breakP->curr = breakP->head->next;
+		prev = breakP->head;
+
+		while (breakP->curr != NULL) {
+			if (breakP->curr->loc == location) {	// 같은 것은 추가하지 않음. 
+				free(tmpNode);
+				return;
+			}
+			else if (breakP->curr->loc > location) { 
+				prev->next = tmpNode;
+				tmpNode->next = breakP->curr;
+				breakP->curr = tmpNode;
+				return;
+			}
+			// 다음 노드로 이동 
+			prev = breakP->curr;
+			breakP->curr = prev->next;
+		}
+		// 새로운 노드가 가장 클 경우 마지막에 저장 
+		prev->next = breakP->curr = tmpNode;
+	}
+
+	return;
+}
+
+void freeBreakPointList(BreakPointList** breakP) {
+
+	// 삭제에 사용될 BreakPoint
+	BreakPointNode* deleteNode = (*breakP)->head;
+
+	// list에 저장된 모든 노드를 삭제한다. head는 그 다음 노드로 저장, delete 삭제 
+	while (deleteNode != NULL) {
+		(*breakP)->head = deleteNode->next;
+		free(deleteNode);
+		deleteNode = (*breakP)->head;
+	}
+	return;
+}
+
