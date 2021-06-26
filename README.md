@@ -1,5 +1,5 @@
 # Assignment 1 :
-본 프로젝트는 어셈블러, 링커, 로더들을 실행하게 될 shell과 컴파일을 통해서 만들어진 object코드가 적재되고 실행될 메모리공간, opcode 값으로 변환 하는 opcode 테이블과 관련 명령어들을 구현한 것이다. 이번 assignment 1에서는 프로젝트에서 다룰SIC/XE machine을 구현하기 위한 사전작업이라고 할 수 있다. 현재 구현할 셸은help, directory, quit 등의 기본적인 작업을 수행하고 다음 프로젝트의 assemble, complile 등 작업에 필요한 1MB의 가상 메모리 공간 할당과 수정을 구현한다. 또한 mnemonic에 대한 opcode의 값을 반환하거나opcodelist를 출력할 수 있다. 그리고 mnemonic은 반드시 대문자로 입력하고 help, quit 등과 같은 명령어는 소문자로 구현한다. 숫자에 대한 입력은 대소문자 가능하도록 한다. 띄어쓰기와 탭은 정제되어 처리될 수 있도록 처리 될 수 있도록 구현한다.
+ 본 프로젝트는 어셈블러, 링커, 로더들을 실행하게 될 shell과 컴파일을 통해서 만들어진 object코드가 적재되고 실행될 메모리공간, opcode 값으로 변환 하는 opcode 테이블과 관련 명령어들을 구현한 것이다. 이번 assignment 1에서는 프로젝트에서 다룰SIC/XE machine을 구현하기 위한 사전작업이라고 할 수 있다. 현재 구현할 셸은help, directory, quit 등의 기본적인 작업을 수행하고 다음 프로젝트의 assemble, complile 등 작업에 필요한 1MB의 가상 메모리 공간 할당과 수정을 구현한다. 또한 mnemonic에 대한 opcode의 값을 반환하거나opcodelist를 출력할 수 있다. 그리고 mnemonic은 반드시 대문자로 입력하고 help, quit 등과 같은 명령어는 소문자로 구현한다. 숫자에 대한 입력은 대소문자 가능하도록 한다. 띄어쓰기와 탭은 정제되어 처리될 수 있도록 처리 될 수 있도록 구현한다.
 
 
 
@@ -30,7 +30,7 @@
 
 
 # Assignment 2 : 
-Assignment 1에서 작성한 프로그램을 확장하여 assemble, symbol, type의 기능을 추가한다. SIC/XE의 assembly 프로그램의 소스파일(asm)을 읽고 명령어를 해석하여 리스팅 파일과 오브젝트 파일을 생성하는 것을 주 목적으로 한다. 이 프로그램은 기본적인 SIC/XE의 프로그램으로 교재의 2.2까지 설명된 어셈블러 기능을 구현하였다. symbol 명령어는 마지막 assemble을 명령어를 성공적으로 끝낸 것에 대한 symbol을 저장하고 있으며 labe에 따라 알파벳 오름차순으로 정렬되어있다. 만약 assemble 명령어가 제대로 수행되지 않았을 경우에도 성공적으로 수행한 symbol을 삭제되지 않는다. 또한 프로그램을 처음 실행하거나 정상적으로 assemble이 되지 않았을 경우 symbol 값이 없으므로 에러 메세지를 출력한다. type 명령어는 파일 이름에 해당하는 파일을 읽어서 출력한다. 해당 파일이 존재하지 않는다면 에러메세지를 출력한다.  help에도 추가된 기능에 대한 명령어를 추가한다.
+ Assignment 1에서 작성한 프로그램을 확장하여 assemble, symbol, type의 기능을 추가한다. SIC/XE의 assembly 프로그램의 소스파일(asm)을 읽고 명령어를 해석하여 리스팅 파일과 오브젝트 파일을 생성하는 것을 주 목적으로 한다. 이 프로그램은 기본적인 SIC/XE의 프로그램으로 교재의 2.2까지 설명된 어셈블러 기능을 구현하였다. symbol 명령어는 마지막 assemble을 명령어를 성공적으로 끝낸 것에 대한 symbol을 저장하고 있으며 labe에 따라 알파벳 오름차순으로 정렬되어있다. 만약 assemble 명령어가 제대로 수행되지 않았을 경우에도 성공적으로 수행한 symbol을 삭제되지 않는다. 또한 프로그램을 처음 실행하거나 정상적으로 assemble이 되지 않았을 경우 symbol 값이 없으므로 에러 메세지를 출력한다. type 명령어는 파일 이름에 해당하는 파일을 읽어서 출력한다. 해당 파일이 존재하지 않는다면 에러메세지를 출력한다.  help에도 추가된 기능에 대한 명령어를 추가한다.
  	해당 보고서에는 symbol, assemble, type에 관련된 함수와 내용을 집중적으로 다루고 있으며 Assignment1의 함수가 변경된 경우에서만 설명할 것이다.  
 Assemble의 알고리즘을 대략적으로 설명하면 asm 파일을 읽어와 start 주소와 program name을 저장하고 label이 있을 경우 symbol table에 저장한다. 또한 현재 loc과 line을 작성하고 현재 loc과 현재 메모리 값을 더한 다음 주소값을 저장하여 사용한다. End를 만나면 pass1을 종료하고 pass1.txt파일을 만든다. Pass2 과정을 통해서 symbol table과 pass1.txt를 이용해 인자의 수 3, 4 , 5개 인지에 따라 opcode와 operand를 구분하여object code를 계산하고 (더 자세한 내용은 주석 참조) obj, lst 파일을 작성한다. 만약 pass2가 실패하면 symbol table과 pass1.txt를 삭제하고, 성공할 경우 파일생성 문구와 pass1.txt를 삭제하고 symbol table을 전역변수인 symtab과 연결한다.
 
@@ -65,7 +65,7 @@ Assemble의 알고리즘을 대략적으로 설명하면 asm 파일을 읽어와
 
 # Assignment 3 : 
 
-Assignment 3는 Assignment 1, 2에 셸(shell)의 명령어 및 기능을 추가한다. Loader는 한개에서 최대 3개의 object 파일을 불러올 수 있다. Linking은 assignment2의  생성된 object 파일 각각을 하나로 묶고, loading은 메모리에 올려서 프로그램 실행 준비를 한다. 또한 progaddr 명령어를 수행해서 프로그램의 시작주소를 지정할 수 있으며 break point를 추가하여 디버깅을 수행할 수 있다. 또한 breakpoint 확인하거나 혹은 삭제할 수 있다. 시간관계상 Run의 과정은 구현하지 못했다. 
+ Assignment 3는 Assignment 1, 2에 셸(shell)의 명령어 및 기능을 추가한다. Loader는 한개에서 최대 3개의 object 파일을 불러올 수 있다. Linking은 assignment2의  생성된 object 파일 각각을 하나로 묶고, loading은 메모리에 올려서 프로그램 실행 준비를 한다. 또한 progaddr 명령어를 수행해서 프로그램의 시작주소를 지정할 수 있으며 break point를 추가하여 디버깅을 수행할 수 있다. 또한 breakpoint 확인하거나 혹은 삭제할 수 있다. 시간관계상 Run의 과정은 구현하지 못했다. 
 
 예제 파일을 설명하자면, loader 명령어를 통해서 proga.obj, progb.obj, progc.obj의 3개의 파일을 linking, loading 과정을 수행할 수 있다. 그리고 copy.obj 파일은 loader 명령어와 run 명령어를 수행할 수 있다.
 
@@ -103,5 +103,10 @@ Assignment 3는 Assignment 1, 2에 셸(shell)의 명령어 및 기능을 추가�
 
 # Assignment 4
 
+ Phase1 : cd, mkdir, rmdir, ls, touch, echo, cat, exit 등의 basic internal shell command를 부모의 shell program에서 fork를 통해 child process를 생성하고 그 child process에서 exec()로 처리 후 부모로 반환한다. cd은 기존 cd와 비슷하게 cd .. , cd . , cd ~, cd , cd ~user 등을 구현했으며 shell의 특정 directory로 이동한다. ls은 directory content의 list를 보여준다. mkdir은 새로운 디렉토리를 만들어주고 rmdir은 디렉토리를 삭제한다. touch는 빈 파일을 생성하거나 기존 파일의 시간을 변경한다. touch dir/file을 입력할 경우 dir 디렉토리에 file을 생성해준다. cat 파일을 읽어주고, echo는 시스템 환경변수 또는 입력 내용을 화면에 출력한다. 예를들어 echo “$HOME” 혹은 $HOME 입력시 환경변수 출력하고 ‘$HOME’ 입력서 ‘$HOME’ 그대로 출력된다. 또한 따음표가 일치하지 않을 시 에러를 출력한다. 마지막으로 exit는 파일을 종료한다.
 
 
+
+# Assignment 5
+
+ 해당 프로젝트는 여러 client들이 동시 접속하여, 주식 서비스를 제공하기 위한 concurrent stock server이다. 본 프로젝트를 위해서 Event_based approach과 thread based approach를 활용하여 구현하였고 두 방식의 차이점에 대해서 간단한 실험을 진행하였다. 우선, 전자의 경우 select 함수를 활용하여 파일 descripter의 변화를 확인하고 서비스를 진행하였다. 후자의 경우 pthread 함수를 활용하여 client 연결시 각 thread를 부여하고 처리하였다.
