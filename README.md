@@ -103,10 +103,14 @@ Assemble의 알고리즘을 대략적으로 설명하면 asm 파일을 읽어와
 
 # Assignment 4
 
+### * Fork()
+
  Phase1 : cd, mkdir, rmdir, ls, touch, echo, cat, exit 등의 basic internal shell command를 부모의 shell program에서 fork를 통해 child process를 생성하고 그 child process에서 exec()로 처리 후 부모로 반환한다. cd은 기존 cd와 비슷하게 cd .. , cd . , cd ~, cd , cd ~user 등을 구현했으며 shell의 특정 directory로 이동한다. ls은 directory content의 list를 보여준다. mkdir은 새로운 디렉토리를 만들어주고 rmdir은 디렉토리를 삭제한다. touch는 빈 파일을 생성하거나 기존 파일의 시간을 변경한다. touch dir/file을 입력할 경우 dir 디렉토리에 file을 생성해준다. cat 파일을 읽어주고, echo는 시스템 환경변수 또는 입력 내용을 화면에 출력한다. 예를들어 echo “$HOME” 혹은 $HOME 입력시 환경변수 출력하고 ‘$HOME’ 입력서 ‘$HOME’ 그대로 출력된다. 또한 따음표가 일치하지 않을 시 에러를 출력한다. 마지막으로 exit는 파일을 종료한다.
 
 
 
 # Assignment 5
+
+### * thread, select
 
  해당 프로젝트는 여러 client들이 동시 접속하여, 주식 서비스를 제공하기 위한 concurrent stock server이다. 본 프로젝트를 위해서 Event_based approach과 thread based approach를 활용하여 구현하였고 두 방식의 차이점에 대해서 간단한 실험을 진행하였다. 우선, 전자의 경우 select 함수를 활용하여 파일 descripter의 변화를 확인하고 서비스를 진행하였다. 후자의 경우 pthread 함수를 활용하여 client 연결시 각 thread를 부여하고 처리하였다.
